@@ -154,6 +154,7 @@
   .m-teams{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
   .m-side{display:flex;align-items:center;gap:8px;min-width:0}
   .m-side.away{flex-direction:row-reverse}
+  .ko-sel{width:auto;min-width:120px;max-width:180px;padding:6px 26px 6px 10px;font-size:13px;font-weight:700;border-radius:9px}
   .m-fl{font-size:21px}
   .m-nm{font-weight:700;font-size:15px;white-space:nowrap}
   .m-nm.tbd{font-weight:600;color:var(--muted);font-size:13px}
@@ -245,6 +246,17 @@
   .lockbar.open .lockbtn{background:var(--brand-lblue);color:#03152e}
   .lockbar #pwInput{width:120px;padding:8px 12px;font-size:13px;border-radius:999px;background:#0c1322;border:1px solid var(--line2);color:var(--text)}
   .lockbar.open #pwInput{display:none}
+  .allocrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+  .allocrow:first-child{border-top:none}
+  .allocname{font-weight:700;font-size:15px}
+  .allocstep{display:flex;align-items:center;gap:8px}
+  .allocstep input{width:56px;text-align:center;padding:8px 4px;font-weight:800;-moz-appearance:textfield}
+  .allocstep input::-webkit-outer-spin-button,.allocstep input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .allocbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line2);background:#0c1322;color:var(--text);font-size:18px;font-weight:800;cursor:pointer;line-height:1}
+  .allocbtn:hover{border-color:var(--brand-dorange);color:var(--brand-lorange)}
+  .alloctotal{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;font-weight:700}
+  .alloctotal.ok{color:var(--brand-lblue)}
+  .alloctotal.bad{color:var(--brand-lorange)}
   @media(max-width:480px){.lockbar{flex-wrap:wrap;border-radius:16px}.lockbar #pwInput{width:100%}}
   @media(max-width:560px){.stat{min-width:0;flex:1 1 30%;padding:11px 8px}.card{padding:18px}.potgrid{grid-template-columns:1fr}}
 </style>
@@ -325,6 +337,11 @@
         <button class="btn" id="addBtn">Add</button>
       </div>
       <div class="chips" id="chips"></div>
+    </div>
+    <div class="card" id="allocCard" style="display:none">
+      <h2>Teams per player</h2>
+      <p class="hint">With fewer than 48 players, choose how many teams each person gets. Defaults to an even split — bump anyone up or down, as long as the total is 48.</p>
+      <div id="allocBody"></div>
     </div>
     <div class="card">
       <h2>Run the draw</h2>
@@ -592,7 +609,7 @@ let editUnlocked = false;
 
 const KEY = "wc2026_sweepstake_v2";
 let state = {
-  participants:[], assignments:{}, eliminated:[], stages:{}, scores:{},
+  participants:[], assignments:{}, eliminated:[], stages:{}, scores:{}, quotas:{}, koTeams:{},
   pot:{fee:null, currency:"£"},
   prizes:[
     {id:"p1",name:"Winners",icon:"🏆",country:null,pct:50},
@@ -616,7 +633,7 @@ const teamsOf = p => COUNTRIES.map(c=>c.n).filter(n=>state.assignments[n]===p);
 const personOut = p => { const t=teamsOf(p); return t.length>0 && t.every(isOut); };
 const drawDone = () => Object.keys(state.assignments).length>0;
 const completeScore = m => { const s=state.scores[m]; return s && s.h!=null && s.a!=null; };
-function goalsFor(team){let g=0;FIXTURES.forEach(f=>{if(!completeScore(f.m))return;const s=state.scores[f.m];if(f.h===team)g+=s.h;if(f.a===team)g+=s.a;});return g;}
+function goalsFor(team){let g=0;FIXTURES.forEach(f=>{if(!completeScore(f.m))return;const s=state.scores[f.m];const H=state.koTeams[f.m+"h"]||f.h,A=state.koTeams[f.m+"a"]||f.a;if(H===team)g+=s.h;if(A===team)g+=s.a;});return g;}
 function groupPtsFor(team){let p=0;FIXTURES.forEach(f=>{if(f.r.length!==1||!completeScore(f.m))return;const s=state.scores[f.m];if(f.h===team){p+=s.h>s.a?WIN_PTS:s.h===s.a?DRAW_PTS:0;}if(f.a===team){p+=s.a>s.h?WIN_PTS:s.a===s.h?DRAW_PTS:0;}});return p;}
 function teamScore(team){return groupPtsFor(team)+goalsFor(team)*GOAL_PTS+STAGE_BONUS[reachedOf(team)];}
 function playerStats(p){
@@ -651,21 +668,61 @@ function renderStats(){
 }
 
 /* ===== Draw tab ===== */
+function evenSplit(names){
+  const n=names.length, out={}; if(!n) return out;
+  const base=Math.floor(COUNTRIES.length/n), rem=COUNTRIES.length-base*n;
+  names.forEach((p,i)=>{ out[p]=base+(i<rem?1:0); });
+  return out;
+}
+function resetQuotas(){ state.quotas=evenSplit(state.participants); }
+function quotaTotal(){ return state.participants.reduce((s,p)=>s+(+state.quotas[p]||0),0); }
 function renderChips(){
   const box=document.getElementById("chips");box.innerHTML="";
   state.participants.forEach((name,i)=>{const c=document.createElement("span");c.className="chip";
     c.innerHTML=`<span>${escapeHtml(name)}</span><button title="Remove" data-i="${i}">×</button>`;box.appendChild(c);});
-  box.querySelectorAll("button").forEach(b=>b.onclick=()=>{state.participants.splice(+b.dataset.i,1);save();renderAll();});
+  box.querySelectorAll("button").forEach(b=>b.onclick=()=>{state.participants.splice(+b.dataset.i,1);resetQuotas();save();renderAll();});
   const h=document.getElementById("drawHint");
   if(!state.participants.length)h.textContent="Add at least one player above first.";
-  else h.innerHTML=`<b>${state.participants.length}</b> player${state.participants.length>1?"s":""} ready — about <b>${Math.ceil(48/state.participants.length)}</b> team(s) each. Running again reshuffles.`;
+  else h.innerHTML=`<b>${state.participants.length}</b> player${state.participants.length>1?"s":""} ready. Running again reshuffles.`;
 }
-function addNames(str){str.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).forEach(p=>{if(!state.participants.includes(p))state.participants.push(p);});save();renderAll();}
+function renderAlloc(){
+  const card=document.getElementById("allocCard"), body=document.getElementById("allocBody");
+  const n=state.participants.length;
+  if(n===0 || n>=COUNTRIES.length){ card.style.display="none"; return; }
+  card.style.display="";
+  const total=quotaTotal(), ok=total===COUNTRIES.length;
+  body.innerHTML = state.participants.map(p=>`
+    <div class="allocrow">
+      <span class="allocname">${escapeHtml(p)}</span>
+      <div class="allocstep">
+        <button class="allocbtn" data-dec="${escapeHtml(p)}">−</button>
+        <input type="number" min="0" max="${COUNTRIES.length}" data-q="${escapeHtml(p)}" value="${+state.quotas[p]||0}">
+        <button class="allocbtn" data-inc="${escapeHtml(p)}">+</button>
+      </div>
+    </div>`).join("") +
+    `<div class="alloctotal ${ok?'ok':'bad'}">Allocated: <b>${total}</b> / ${COUNTRIES.length} teams ${ok?'✓':'— must equal '+COUNTRIES.length}</div>
+     <div class="row" style="margin-top:12px"><button class="btn ghost sm" id="allocEven">Reset to even split</button></div>`;
+  const upd=(p,v)=>{ state.quotas[p]=Math.max(0,Math.min(COUNTRIES.length,v)); save(); renderAlloc(); };
+  body.querySelectorAll("input[data-q]").forEach(inp=>inp.onchange=()=>upd(inp.dataset.q, inp.value===""?0:parseInt(inp.value,10)||0));
+  body.querySelectorAll("[data-inc]").forEach(b=>b.onclick=()=>upd(b.dataset.inc,(+state.quotas[b.dataset.inc]||0)+1));
+  body.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>upd(b.dataset.dec,(+state.quotas[b.dataset.dec]||0)-1));
+  body.querySelector("#allocEven").onclick=()=>{ resetQuotas(); save(); renderAlloc(); };
+}
+function addNames(str){str.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).forEach(p=>{if(!state.participants.includes(p))state.participants.push(p);});resetQuotas();save();renderAll();}
 function runDraw(){
   if(!state.participants.length){alert("Add some players first!");return;}
+  const n=state.participants.length;
+  if(n<COUNTRIES.length && quotaTotal()!==COUNTRIES.length){
+    toast(`Teams per player must total ${COUNTRIES.length} (currently ${quotaTotal()})`); switchView("draw"); return;
+  }
   if(drawDone()&&!confirm("Re-run the draw? This reshuffles every team."))return;
-  const teams=shuffle(COUNTRIES.map(c=>c.n)),people=shuffle(state.participants),a={};
-  teams.forEach((t,i)=>{a[t]=people[i%people.length];});
+  const teams=shuffle(COUNTRIES.map(c=>c.n)), a={};
+  if(n>=COUNTRIES.length){
+    teams.forEach((t,i)=>{ a[t]=state.participants[i]; }); // one each, extras get none
+  } else {
+    let idx=0;
+    state.participants.forEach(p=>{ const q=+state.quotas[p]||0; for(let k=0;k<q && idx<teams.length;k++){ a[teams[idx++]]=p; } });
+  }
   state.assignments=a;justDrew=true;save();renderAll();switchView("players");
 }
 
@@ -719,11 +776,27 @@ function renderTeams(){
 }
 
 /* ===== Fixtures tab ===== */
-function matchSide(team,side,score,other){
-  const real=isRealTeam(team),holder=real?state.assignments[team]:null,dead=real&&isOut(team),won=(score!=null&&other!=null&&score>other);
-  return `<div class="m-side ${side} ${won?'win':''}">
-    ${real?`<span class="m-fl">${flagOf(team)}</span>`:''}
-    <span class="m-nm ${real?(dead?'dead':''):'tbd'}">${escapeHtml(team)}</span>
+function matchSide(f,side,score,other){
+  const raw = side==="a" ? f.a : f.h;
+  const sideCls = side==="a" ? "away" : "home";
+  const ko = f.r.length>1;                       // knockout slot (placeholder)
+  const eff = state.koTeams[f.m+side] || (isRealTeam(raw)?raw:"");
+  const real = isRealTeam(eff);
+  const holder = real ? state.assignments[eff] : null;
+  const dead = real && isOut(eff);
+  const won = (score!=null && other!=null && score>other);
+  if(!ko){
+    return `<div class="m-side ${sideCls} ${won?'win':''}">
+      <span class="m-fl">${flagOf(raw)}</span>
+      <span class="m-nm ${dead?'dead':''}">${escapeHtml(raw)}</span>
+      ${holder?`<span class="m-hold">${escapeHtml(holder)}</span>`:''}</div>`;
+  }
+  const opts = `<option value="">${escapeHtml(raw)}</option>` +
+    COUNTRIES.map(c=>`<option value="${escapeHtml(c.n)}" ${eff===c.n?'selected':''}>${c.f}  ${escapeHtml(c.n)}</option>`).join("");
+  return `<div class="m-side ${sideCls} ${won?'win':''}">
+    ${real?`<span class="m-fl">${flagOf(eff)}</span>`:''}
+    <select class="ko-sel" data-ko-m="${f.m}" data-ko-side="${side}">${opts}</select>
+    ${dead?'<span style="color:var(--red);font-size:11px;font-weight:700">OUT</span>':''}
     ${holder?`<span class="m-hold">${escapeHtml(holder)}</span>`:''}</div>`;
 }
 function renderFixtures(){
@@ -745,7 +818,7 @@ function renderFixtures(){
     const s=state.scores[f.m]||{},rd=f.r.length===1?`Group ${f.r}`:(STAGE_LABELS[f.r]||f.r),ko=f.r.length>1,mine=state.assignments[f.h]||state.assignments[f.a];
     html+=`<div class="match ${mine?'live-team':''}">
       <div class="m-meta"><span class="m-time">${f.t}</span><span class="m-rd ${ko?'ko':''}">${rd}</span></div>
-      <div class="m-teams">${matchSide(f.h,'home',s.h,s.a)}<span class="vs" style="color:var(--muted);font-weight:700">v</span>${matchSide(f.a,'away',s.a,s.h)}</div>
+      <div class="m-teams">${matchSide(f,'h',s.h,s.a)}<span class="vs" style="color:var(--muted);font-weight:700">v</span>${matchSide(f,'a',s.a,s.h)}</div>
       <div class="m-score">
         <input type="number" min="0" inputmode="numeric" data-m="${f.m}" data-side="h" value="${s.h!=null?s.h:''}" aria-label="home score">
         <span class="vs">–</span>
@@ -759,6 +832,11 @@ function renderFixtures(){
       if(state.scores[m].h==null&&state.scores[m].a==null)delete state.scores[m];
       save();renderStats();renderTeams();};
     inp.onchange=()=>renderFixtures();});
+  body.querySelectorAll("select.ko-sel").forEach(sel=>sel.onchange=()=>{
+    const k=sel.dataset.koM+sel.dataset.koSide;
+    if(sel.value) state.koTeams[k]=sel.value; else delete state.koTeams[k];
+    save(); renderAll();
+  });
 }
 
 /* ===== Tables tab ===== */
@@ -919,7 +997,7 @@ function applyLock(){
   document.querySelectorAll("[data-ko],[data-del]").forEach(b=>b.style.display = locked ? "none" : "");
   const ag = document.getElementById("applyGroups"); if(ag) ag.style.display = locked ? "none" : "";
 }
-function renderAll(){renderStats();renderChips();renderPlayers();renderTeams();renderFixtures();renderTables();renderLeaderboard();renderPrizes();applyLock();}
+function renderAll(){renderStats();renderChips();renderAlloc();renderPlayers();renderTeams();renderFixtures();renderTables();renderLeaderboard();renderPrizes();applyLock();}
 function switchView(v){document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===v));document.querySelectorAll(".view").forEach(s=>s.classList.toggle("active",s.id==="view-"+v));}
 
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
@@ -934,7 +1012,7 @@ document.getElementById("addBtn").onclick=()=>{const inp=document.getElementById
 document.getElementById("nameInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();document.getElementById("addBtn").click();}});
 document.getElementById("drawBtn").onclick=runDraw;
 document.getElementById("clearNames").onclick=()=>{if(confirm("Remove all players?")){state.participants=[];state.assignments={};save();renderAll();}};
-document.getElementById("resetAll").onclick=()=>{if(confirm("Reset EVERYTHING — players, draw, stages, scores, pot and prizes?")){state.participants=[];state.assignments={};state.eliminated=[];state.stages={};state.scores={};state.pot={fee:null,currency:state.pot.currency};state.prizes.forEach(p=>p.country=null);save();renderAll();switchView("draw");}};
+document.getElementById("resetAll").onclick=()=>{if(confirm("Reset EVERYTHING — players, draw, stages, scores, pot and prizes?")){state.participants=[];state.assignments={};state.eliminated=[];state.stages={};state.scores={};state.koTeams={};state.pot={fee:null,currency:state.pot.currency};state.prizes.forEach(p=>p.country=null);save();renderAll();switchView("draw");}};
 document.getElementById("addPrize").onclick=()=>{const inp=document.getElementById("prizeInput"),v=inp.value.trim();if(!v)return;state.prizes.push({id:"p"+Date.now(),name:v,icon:"🏅",country:null,pct:0});inp.value="";save();renderAll();};
 document.getElementById("prizeInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();document.getElementById("addPrize").click();}});
 document.querySelectorAll("#stageFilter .seg-btn").forEach(b=>b.onclick=()=>{fxStage=b.dataset.stage;document.querySelectorAll("#stageFilter .seg-btn").forEach(x=>x.classList.toggle("active",x===b));renderFixtures();});
@@ -948,6 +1026,7 @@ document.getElementById("feeInput").oninput=e=>{state.pot.fee=e.target.value==="
 
 load();
 tryLoadFromHash();
+if(state.participants.length && state.participants.length<COUNTRIES.length && quotaTotal()!==COUNTRIES.length) resetQuotas();
 renderAll();
 </script>
 </body>
