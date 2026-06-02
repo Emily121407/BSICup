@@ -830,7 +830,8 @@ function renderFixtures(){
     inp.oninput=()=>{const m=+inp.dataset.m,side=inp.dataset.side;if(!state.scores[m])state.scores[m]={h:null,a:null};
       state.scores[m][side]=inp.value===""?null:Math.max(0,parseInt(inp.value,10)||0);
       if(state.scores[m].h==null&&state.scores[m].a==null)delete state.scores[m];
-      save();renderStats();renderTeams();};
+      // refresh every score-dependent view (not Fixtures itself, to keep typing focus)
+      save();renderStats();renderPlayers();renderTeams();renderTables();renderLeaderboard();renderPrizes();};
     inp.onchange=()=>renderFixtures();});
   body.querySelectorAll("select.ko-sel").forEach(sel=>sel.onchange=()=>{
     const k=sel.dataset.koM+sel.dataset.koSide;
