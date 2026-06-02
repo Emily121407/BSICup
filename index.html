@@ -235,6 +235,17 @@
   .danger-zone{margin-top:8px;display:flex;justify-content:center}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:var(--green);color:#04210f;font-weight:800;padding:13px 22px;border-radius:12px;opacity:0;transition:.3s;pointer-events:none;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.4)}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .lockbar{display:flex;align-items:center;justify-content:center;gap:12px;max-width:520px;margin:0 auto;padding:11px 16px;background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--brand-dorange);border-radius:999px;font-weight:700;font-size:14px}
+  .lockbar.open{border-color:var(--brand-lblue)}
+  .lockbar .lockdot{width:11px;height:11px;border-radius:50%;background:var(--brand-dorange);box-shadow:0 0 0 4px var(--gold-dim)}
+  .lockbar.open .lockdot{background:var(--brand-lblue);box-shadow:0 0 0 4px var(--blue-dim)}
+  .lockbar #lockState{color:var(--muted)}
+  .lockbtn{margin-left:4px;background:var(--brand-dorange);color:#1a1304;border:none;border-radius:999px;padding:9px 16px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;transition:.15s;white-space:nowrap}
+  .lockbtn:hover{filter:brightness(1.07)}
+  .lockbar.open .lockbtn{background:var(--brand-lblue);color:#03152e}
+  .lockbar #pwInput{width:120px;padding:8px 12px;font-size:13px;border-radius:999px;background:#0c1322;border:1px solid var(--line2);color:var(--text)}
+  .lockbar.open #pwInput{display:none}
+  @media(max-width:480px){.lockbar{flex-wrap:wrap;border-radius:16px}.lockbar #pwInput{width:100%}}
   @media(max-width:560px){.stat{min-width:0;flex:1 1 30%;padding:11px 8px}.card{padding:18px}.potgrid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -286,6 +297,13 @@
       <div class="stat"><b id="stPot">—</b><span>Prize Pot</span></div>
     </div>
   </header>
+
+  <div class="lockbar" id="lockbar">
+    <span class="lockdot"></span>
+    <span id="lockState">View-only</span>
+    <input type="password" id="pwInput" placeholder="Password" autocomplete="off">
+    <button class="lockbtn" id="lockBtn">🔒 Unlock</button>
+  </div>
 
   <nav class="tabs">
     <button class="tab active" data-view="draw">The Draw</button>
@@ -560,6 +578,18 @@ const STAGE_BONUS = [0,4,8,16,28,44,64];
 const WIN_PTS=3, DRAW_PTS=1, GOAL_PTS=1;
 
 /* ===== State ===== */
+/* =========================================================
+   EDIT PASSWORD
+   Change "wc2026" below to your own password.
+   Anyone who enters it can edit; everyone else sees the
+   sweepstake in view-only mode. The app always opens locked.
+   Note: this is a light gate to stop casual edits, not strong
+   security — the value lives in this file, so a determined
+   technical user could find it. Fine for a friendly sweepstake.
+   ========================================================= */
+const EDIT_PASSWORD = "wc2026";
+let editUnlocked = false;
+
 const KEY = "wc2026_sweepstake_v2";
 let state = {
   participants:[], assignments:{}, eliminated:[], stages:{}, scores:{},
@@ -870,10 +900,36 @@ function drawBoardCard(){
 }
 
 /* ===== Plumbing ===== */
-function renderAll(){renderStats();renderChips();renderPlayers();renderTeams();renderFixtures();renderTables();renderLeaderboard();renderPrizes();}
+function applyLock(){
+  const locked = !editUnlocked;
+  document.body.classList.toggle("locked", locked);
+  document.getElementById("lockbar").classList.toggle("open", !locked);
+  document.getElementById("lockState").textContent = locked ? "View-only" : "Editing enabled";
+  document.getElementById("lockBtn").textContent = locked ? "🔒 Unlock to edit" : "🔓 Lock";
+  // hide the editing-only Draw tab when locked
+  const drawTab = document.querySelector('.tab[data-view="draw"]');
+  if(drawTab) drawTab.style.display = locked ? "none" : "";
+  if(locked && document.getElementById("view-draw").classList.contains("active")) switchView("players");
+  // disable every form control except the view filters
+  document.querySelectorAll("input, select, textarea").forEach(el=>{
+    if(el.closest("#stageFilter") || el.id==="mineOnly" || el.id==="pwInput"){ el.disabled=false; return; }
+    el.disabled = locked;
+  });
+  // hide mutating buttons
+  document.querySelectorAll("[data-ko],[data-del]").forEach(b=>b.style.display = locked ? "none" : "");
+  const ag = document.getElementById("applyGroups"); if(ag) ag.style.display = locked ? "none" : "";
+}
+function renderAll(){renderStats();renderChips();renderPlayers();renderTeams();renderFixtures();renderTables();renderLeaderboard();renderPrizes();applyLock();}
 function switchView(v){document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===v));document.querySelectorAll(".view").forEach(s=>s.classList.toggle("active",s.id==="view-"+v));}
 
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
+document.getElementById("lockBtn").onclick=()=>{
+  const inp=document.getElementById("pwInput");
+  if(editUnlocked){ editUnlocked=false; inp.value=""; applyLock(); toast("Locked"); return; }
+  if(inp.value===EDIT_PASSWORD){ editUnlocked=true; inp.value=""; applyLock(); toast("Editing unlocked"); }
+  else { toast("Incorrect password"); inp.focus(); }
+};
+document.getElementById("pwInput").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); document.getElementById("lockBtn").click(); } });
 document.getElementById("addBtn").onclick=()=>{const inp=document.getElementById("nameInput");if(inp.value.trim()){addNames(inp.value);inp.value="";inp.focus();}};
 document.getElementById("nameInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();document.getElementById("addBtn").click();}});
 document.getElementById("drawBtn").onclick=runDraw;
