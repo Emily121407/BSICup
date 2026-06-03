@@ -244,6 +244,9 @@
   .lockbtn{margin-left:4px;background:var(--brand-dorange);color:#1a1304;border:none;border-radius:999px;padding:9px 16px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;transition:.15s;white-space:nowrap}
   .lockbtn:hover{filter:brightness(1.07)}
   .lockbar.open .lockbtn{background:var(--brand-lblue);color:#03152e}
+  .lockbtn.undo{background:transparent;border:1px solid var(--line2);color:var(--text)}
+  .lockbtn.undo:hover{border-color:var(--brand-lorange);color:var(--brand-lorange);filter:none}
+  .lockbtn.undo:disabled{opacity:.4;cursor:not-allowed}
   .lockbar #pwInput{width:120px;padding:8px 12px;font-size:13px;border-radius:999px;background:#0c1322;border:1px solid var(--line2);color:var(--text)}
   .lockbar.open #pwInput{display:none}
   .allocrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
@@ -315,6 +318,7 @@
     <span id="lockState">View-only</span>
     <input type="password" id="pwInput" placeholder="Password" autocomplete="off">
     <button class="lockbtn" id="lockBtn">🔒 Unlock</button>
+    <button class="lockbtn undo" id="undoBtn" style="display:none">↶ Undo</button>
   </div>
 
   <nav class="tabs">
@@ -623,7 +627,26 @@ let justDrew=false, fxStage="all", fxMine=false;
 function load(){
   try{ const raw=localStorage.getItem(KEY); if(raw) state=Object.assign(state,JSON.parse(raw)); }catch(e){}
 }
-function save(){ try{ localStorage.setItem(KEY,JSON.stringify(state)); }catch(e){} }
+let undoStack=[], lastJSON=null;
+const MAX_UNDO=80;
+function save(){
+  if(lastJSON!==null){ undoStack.push(lastJSON); if(undoStack.length>MAX_UNDO) undoStack.shift(); }
+  lastJSON=JSON.stringify(state);
+  try{ localStorage.setItem(KEY,lastJSON); }catch(e){}
+  updateUndoBtn();
+}
+function undo(){
+  if(!undoStack.length) return;
+  const prev=undoStack.pop();
+  state=JSON.parse(prev); lastJSON=prev;
+  try{ localStorage.setItem(KEY,prev); }catch(e){}
+  renderAll(); updateUndoBtn(); toast("Undone");
+}
+function updateUndoBtn(){
+  const b=document.getElementById("undoBtn"); if(!b) return;
+  b.disabled = undoStack.length===0;
+  b.style.display = (editUnlocked && undoStack.length>0) ? "" : "none";
+}
 
 /* ===== Helpers ===== */
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
@@ -997,6 +1020,7 @@ function applyLock(){
   // hide mutating buttons
   document.querySelectorAll("[data-ko],[data-del]").forEach(b=>b.style.display = locked ? "none" : "");
   const ag = document.getElementById("applyGroups"); if(ag) ag.style.display = locked ? "none" : "";
+  updateUndoBtn();
 }
 function renderAll(){renderStats();renderChips();renderAlloc();renderPlayers();renderTeams();renderFixtures();renderTables();renderLeaderboard();renderPrizes();applyLock();}
 function switchView(v){document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===v));document.querySelectorAll(".view").forEach(s=>s.classList.toggle("active",s.id==="view-"+v));}
@@ -1009,6 +1033,8 @@ document.getElementById("lockBtn").onclick=()=>{
   else { toast("Incorrect password"); inp.focus(); }
 };
 document.getElementById("pwInput").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); document.getElementById("lockBtn").click(); } });
+document.getElementById("undoBtn").onclick=undo;
+document.addEventListener("keydown",e=>{ if(editUnlocked && (e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); } });
 document.getElementById("addBtn").onclick=()=>{const inp=document.getElementById("nameInput");if(inp.value.trim()){addNames(inp.value);inp.value="";inp.focus();}};
 document.getElementById("nameInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();document.getElementById("addBtn").click();}});
 document.getElementById("drawBtn").onclick=runDraw;
@@ -1026,6 +1052,7 @@ document.getElementById("curSel").onchange=e=>{state.pot.currency=e.target.value
 document.getElementById("feeInput").oninput=e=>{state.pot.fee=e.target.value===""?null:Math.max(0,+e.target.value);save();renderStats();renderPot();renderPrizes();};
 
 load();
+lastJSON=JSON.stringify(state);
 tryLoadFromHash();
 if(state.participants.length && state.participants.length<COUNTRIES.length && quotaTotal()!==COUNTRIES.length) resetQuotas();
 renderAll();
